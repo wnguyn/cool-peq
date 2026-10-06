@@ -4,7 +4,7 @@
 
 #include "Vpeq.h"
 #include <cstdint>
-
+#include <memory>
 
 
 constexpr void tick(Vpeq* circuit) {
@@ -16,33 +16,61 @@ constexpr void tick(Vpeq* circuit) {
 }
 
 
-// we're freaking ffing i dont want to deal with c++....
-extern "C" {
-    void* peq_create() {
-        auto* circuit = new Vpeq;
 
-        circuit->sample_in = 0;
-        circuit->rst = 1;
-        tick(circuit);
-        circuit->rst = 0;
+// SUUPER DUMB BOILERPLATE!!
+int main(int argc, char** argv) {
+    auto ctxt = std::make_unique<VerilatedContext>();
+    ctxt->commandArgs(argc, argv);
+    auto dut = std::make_unique<Vpeq>(context.get());
 
-        return circuit;
+    std::ifstream input = (
+        "input.pcm",
+        std::ios::binary
+    );
+    std::ofstream output = (
+        "output.pcm",
+        std::ios::binary
+    );
+    dut->clk = 0;
+    dut->rst = 1;
+
+    dut->sample_valid = 0;
+    dut->sample_in = 0;
+
+    for (int i = 0; i < 10; ++i) {
+        tick(*dut);
     }
-    // feed raw pcm from rust to get fed 
-    int16_t peq_process(void* handle, int16_t sample) {
-        auto* circuit = std::static_cast<Vpeq*>(handle);
+    int16_t input_sample;
 
-        circuit->sample_in = std::static_cast<uint16_t>(sample);
-        tick(circuit);
+    while (
+        input.read(
+            reinterpret_cast<char*>(&input_sample),
+            sizeof(input_sample)
+        )
+    ) {
+        dut->sample_in =
+            static_cast<uint16_t>(input_sample);
 
-        return std::static_cast<int16_t>(circuit->sample_out);
-    }
+        dut->sample_valid = 1;
 
-    void peq_destroy(void* handle) {
-        auto* circuit = std::static_cast<Vpeq*>(handle);
+        tick(*dut);
 
-        circuit->final();
-        delete circuit;
+        dut->sample_valid = 0;
+
+
+        while (!dut->sample_out_valid) {
+            tick(*dut);
+        }
+
+
+        int16_t output_sample =
+            static_cast<int16_t>(dut->sample_out);
+
+
+        output.write(
+            reinterpret_cast<const char*>(&output_sample),
+            sizeof(output_sample)
+        );
     }
 
 }
